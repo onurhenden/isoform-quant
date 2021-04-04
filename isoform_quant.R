@@ -27,4 +27,7 @@ if (!interactive()) {
   
   subset_gtf <- gtf_df %>% filter(gene_name %in% c(tumor_genes, myeloid_genes, tcell_genes, stromal_genes, bcell_genes))
   unique_transcript_ids <- subset_gtf %>% distinct(transcript_id,gene_name)
+  subset_expression_reads <- expression_reads  %>% 
+    filter(Gene_or_Transcript_ID %in% c(unique_transcript_ids$transcript_id)) %>% 
+    left_join(unique_transcript_ids, by = c("Gene_or_Transcript_ID" = "transcript_id"))
 }
