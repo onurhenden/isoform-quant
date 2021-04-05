@@ -25,7 +25,18 @@ if (!interactive()) {
   stromal_genes <- c("TMEM59", "TSC22D1")
   bcell_genes <- c("HNRNPK", "MMADHC", "UBB", "ARPC2", "HNRNPA1", "EIF4A2", "CLK1", "ACTG1", "YWHAZ", "FKBP1A", "SUMO2", "BRK1", "EIF2S1", "GSPT1", "GPBP1L1", "CSNK1A1", "PFN1", "LTV1", "SNAP23", "ACTB", "TAF9", "DDX5", "LAP3")
   
-  subset_gtf <- gtf_df %>% filter(gene_name %in% c(tumor_genes, myeloid_genes, tcell_genes, stromal_genes, bcell_genes))
+  gene_list <- c(tumor_genes, myeloid_genes, tcell_genes, stromal_genes, bcell_genes)
+  class_labels <- c( rep("tumor", length(tumor_genes)),
+                     rep("myeloid", length(myeloid_genes)),
+                     rep("tcell", length(tcell_genes)),
+                     rep("stromal", length(stromal_genes)),
+                     rep("bcell", length(bcell_genes)))
+  
+  genes_df <- data.frame(gene_list, class_labels)
+  
+  
+  
+  subset_gtf <- gtf_df %>% filter(gene_name %in% genes_df$gene_list)
   unique_transcript_ids <- subset_gtf %>% distinct(transcript_id,gene_name)
   subset_expression_reads <- expression_reads  %>% 
     filter(Gene_or_Transcript_ID %in% c(unique_transcript_ids$transcript_id)) %>% 
