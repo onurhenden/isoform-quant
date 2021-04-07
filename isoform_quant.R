@@ -70,4 +70,15 @@ if (!interactive()) {
   mean_transcript_values <- joined_data_subset %>% group_by(classLabel) %>% summarise_all( mean)
   median_transcript_values <- joined_data_subset %>% group_by(classLabel) %>% summarise_all( median)
   
+  transcript_id_gene_mapping <- gtf_df %>% filter(type == "transcript") %>%  distinct(transcript_id, gene_name, gene_type,width)
+  
+  mean_transcript_values_t <- as.data.frame(t(rbind(colnames(mean_transcript_values) , mean_transcript_values)))
+  names(mean_transcript_values_t) <- as.matrix(mean_transcript_values_t[1,])
+  mean_transcript_values_t <- mean_transcript_values_t[-1,] 
+  
+  mean_transcript_values_t <- mean_transcript_values_t %>% dplyr::rename(transcript_id = classLabel)
+  joined_mean_data <- left_join(mean_transcript_values_t, transcript_id_gene_mapping)
+  
+  write.csv(joined_mean_data %>% rename(select(gene_name, transcript_id, gene_type, width, Tumor, NonTumor), "mean_data.csv"))
+            
 }
