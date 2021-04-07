@@ -17,8 +17,6 @@ if(!file.exists("data/gencode.v27.annotation.gtf.gz")){
 
 if (!interactive()) {
   gtf_df <- as.data.frame(rtracklayer::import('data/gencode.v27.annotation.gtf.gz'))
-  expression_reads <- read.csv("data/expression.matrix.tx.numreads.tsv", sep = '\t' , header = TRUE)
-  
   tumor_genes <- c("GGCT", "H3F3A", "NME1", "PABPC1", "MYL12B", "CHCHD2", "HSP90AB1", "NR4A1", "TSTA3", "ZNF706", "SET", "SOD1", "ALDOA")
   myeloid_genes <- c("ATP6V0E1", "HLA-A", "SEP15", "RHOA", "B2M")
   tcell_genes <- c("SH3BGRL3", "PSMC2", "GABARAP", "WAC", "CFL1", "CLIC1", "TMEM126B", "CTSB", "RPL23A", "HSP90AA1", "LAP3", "DDX5", "RHOA", "B2M")
@@ -34,11 +32,42 @@ if (!interactive()) {
   
   genes_df <- data.frame(gene_list, class_labels)
   
+  rm(tumor_genes,myeloid_genes,tcell_genes,stromal_genes,bcell_genes,gene_list,class_labels )
   
   
-  subset_gtf <- gtf_df %>% filter(gene_name %in% genes_df$gene_list)
-  unique_transcript_ids <- subset_gtf %>% distinct(transcript_id,gene_name)
-  subset_expression_reads <- expression_reads  %>% 
+  gtf_df <- gtf_df %>% filter(gene_name %in% genes_df$gene_list)
+  
+  unique_transcript_ids <- gtf_df %>% distinct(transcript_id)
+  
+  expression_reads <- read.table("data/expression.matrix.tx.numreads.tsv", sep = '\t' , header = TRUE , stringsAsFactors = FALSE)
+  
+  expression_reads <- expression_reads  %>% 
     filter(Gene_or_Transcript_ID %in% c(unique_transcript_ids$transcript_id)) %>% 
     left_join(unique_transcript_ids, by = c("Gene_or_Transcript_ID" = "transcript_id"))
+  
+  expression_reads <- rbind(colnames(expression_reads) , expression_reads)
+  expression_reads <- as.data.frame(t(expression_reads))
+  names(expression_reads) <- as.matrix(expression_reads[1,])
+  expression_reads <- expression_reads[-1,] 
+  colnames(expression_reads)[1] = "Sample ID"
+  
+  #convert characters  to doubles
+  expression_reads[,2:614] <- lapply(expression_reads[,2:614], function(x) as.numeric(replace(x, is.na(x), 0)))
+  
+  library("readxl")
+  sampleid_disease_mapping <- read_excel("../bio-pipeline/Data/appended_Excel_corrected.xlsx",col_names = FALSE)
+  sampleid_disease_mapping <- as.data.frame(t(sampleid_disease_mapping))
+  names(sampleid_disease_mapping) <- as.matrix(sampleid_disease_mapping[1,])
+  sampleid_disease_mapping <- sampleid_disease_mapping[-1,] 
+  sampleid_disease_mapping <- sampleid_disease_mapping %>% select(`Sample ID`, `Patient ID`, `Cell Type`, Subtype)
+  
+  joined_data <- left_join(expression_reads, sampleid_disease_mapping, by="Sample ID")
+  joined_data_subset <- joined_data %>% mutate(classLabel = ifelse(`Cell Type` == "Tumor", "Tumor", "NonTumor" )) %>% 
+    select(-`Patient ID`,-`Cell Type`, -Subtype , -`Sample ID`) %>% 
+    filter(!is.na(classLabel))#filtering out bulk samples
+    
+  
+  mean_transcript_values <- joined_data_subset %>% group_by(classLabel) %>% summarise_all( mean)
+  median_transcript_values <- joined_data_subset %>% group_by(classLabel) %>% summarise_all( median)
+  
 }
