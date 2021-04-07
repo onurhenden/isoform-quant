@@ -79,6 +79,6 @@ if (!interactive()) {
   mean_transcript_values_t <- mean_transcript_values_t %>% dplyr::rename(transcript_id = classLabel)
   joined_mean_data <- left_join(mean_transcript_values_t, transcript_id_gene_mapping)
   
-  write.csv(joined_mean_data %>% rename(select(gene_name, transcript_id, gene_type, width, Tumor, NonTumor), "mean_data.csv"))
+  write.csv(joined_mean_data %>% select(gene_name, transcript_id, gene_type, width, Tumor, NonTumor), "mean_data.csv")
             
 }
