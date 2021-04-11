@@ -68,7 +68,7 @@ if (!interactive()) {
     
   
   mean_transcript_values <- joined_data_subset %>% group_by(classLabel) %>% summarise_all( mean)
-  median_transcript_values <- joined_data_subset %>% group_by(classLabel) %>% summarise_all( median)
+  # median_transcript_values <- joined_data_subset %>% group_by(classLabel) %>% summarise_all( median)
   
   transcript_id_gene_mapping <- gtf_df %>% filter(type == "transcript") %>%  distinct(transcript_id, gene_name, gene_type,width)
   
@@ -78,7 +78,16 @@ if (!interactive()) {
   
   mean_transcript_values_t <- mean_transcript_values_t %>% dplyr::rename(transcript_id = classLabel)
   joined_mean_data <- left_join(mean_transcript_values_t, transcript_id_gene_mapping)
+
+  ratio_mean_data <- joined_mean_data %>% 
+    mutate(ratio = as.numeric(Tumor) /  as.numeric(NonTumor)) %>% 
+    filter(as.numeric(NonTumor) >10 ) %>%  # Filter the low count
+    group_by(gene_name) %>% mutate(avg_ratio = mean(ratio)) %>% ungroup() %>% 
+    mutate(candidate = ifelse( avg_ratio > 1,
+                               ifelse( ratio < avg_ratio / 2, TRUE, FALSE ),
+                               ifelse( ratio > avg_ratio * 2 , ifelse(ratio>1, TRUE, FALSE), FALSE)))
+    
   
-  write.csv(joined_mean_data %>% select(gene_name, transcript_id, gene_type, width, Tumor, NonTumor), "mean_data.csv")
+  write.csv(ratio_mean_data %>% select(gene_name, transcript_id, gene_type, width, Tumor, NonTumor, ratio, avg_ratio, candidate), "ratio_mean_data.csv")
             
 }
