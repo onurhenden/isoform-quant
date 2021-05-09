@@ -4,11 +4,10 @@ if(!require(rtracklayer))
     install.packages("BiocManager")
   BiocManager::install("rtracklayer")
 }
-library(rtracklayer)
-
 if(!require(dplyr)) {
   install.packages("dplyr")
 }
+library(rtracklayer)
 library(dplyr)
 
 if(!file.exists("data/gencode.v27.annotation.gtf.gz")){
@@ -82,6 +81,7 @@ if (!interactive()) {
   ratio_mean_data <- joined_mean_data %>% 
     mutate(ratio = as.numeric(Tumor) /  as.numeric(NonTumor)) %>% 
     filter(as.numeric(NonTumor) >10 ) %>%  # Filter the low count
+    filter(as.numeric(Tumor) >10 ) %>%  # Filter the low count
     group_by(gene_name) %>% mutate(avg_ratio = mean(ratio)) %>% ungroup() %>% 
     mutate(candidate = ifelse( avg_ratio > 1,
                                ifelse( ratio < avg_ratio / 2, TRUE, FALSE ),
