@@ -60,10 +60,11 @@ if (!interactive())
     
     transcript_size_gene <- length(selected_tids)
     # Perform manova on it
-    print(paste0("Index -> ",i, " Starting manova on gene ->" , selected_gene_id , " having tx'size : ", transcript_size_gene))
     cmp <- cmpoutput("scRNA-seq", transcript_size_gene , selected_tid_tpms, as.factor(classLabels))
-    print(paste0("Finishing manova on gene ->" , selected_gene_id))
     output[i,] = c(selected_gene_id, cmp$p.values$manova)
   }
   
+  output[,2] <- sapply(output[,2] , as.numeric) # convert p values to numeric
+  
+  write.csv(output_converted %>% arrange(manova_p_value)  , "manova-outputs.csv")
 }
