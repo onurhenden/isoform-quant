@@ -11,15 +11,24 @@ if (!interactive())
 {
   gtf_df <- as.data.frame(rtracklayer::import('data/gencode.v27.annotation.gtf.gz'))
   
+  phenotypes <- read.csv("data/phenotype.csv", sep = ",", header= TRUE)
+  classLabels <- phenotypes$phenotype
+  selected_samples <- phenotypes$Sample.ID
+  
   expression_reads <- read.table("data/expression.matrix.tx.numreads.tsv", sep = '\t' , header = TRUE , stringsAsFactors = FALSE)
   rownames(expression_reads) <- expression_reads[,1] # add transcriptIDs as rownames
   
-  
-  phenotypes <- read.csv("data/phenotype.csv", sep = ",", header= TRUE)
-  classLabels <- phenotypes$phenotype
-  selected_samples <- phenotypes$Sample.ID 
-  
+  # get only samples given in phenotypeCSV
   expression_reads_filtered <- expression_reads %>% select(Gene_or_Transcript_ID,all_of(selected_samples))
+  # take out transcripts with zero read count on all samples
+  # expression_reads_filtered <- expression_reads_filtered[rowSums(expression_reads_filtered[,-1])>0,] 
+  
+  sampleSize <- ncol(expression_reads_filtered) -1 # take out gene_id column
+  
+  expression_reads_filtered <- expression_reads_filtered %>% 
+    mutate(ZeroCounts =  rowSums(.[,-1]== 0) ) %>% 
+    filter(ZeroCounts < sampleSize * 0.9) %>% 
+    select(-ZeroCounts)
   
   transcripts_genes <- expression_reads_filtered %>% 
     select(Gene_or_Transcript_ID) %>% #get the transcript column
@@ -39,7 +48,8 @@ if (!interactive())
   # transpose matrix and keep transcriptIDs as colnames and add seperate sampleID column
   expression_reads_filtered <- expression_reads_filtered[,-1] # Take out geneID column
   transpose_tpms <- t_dt(expression_reads_filtered)
-  
+
+  output <- setNames(data.frame(matrix(ncol = 2, nrow = 0)), c("gene_id", "manova_p_value"))
   
   for(i in 1:nrow(transcripts_genes))
   {
@@ -50,8 +60,10 @@ if (!interactive())
     
     transcript_size_gene <- length(selected_tids)
     # Perform manova on it
+    print(paste0("Index -> ",i, " Starting manova on gene ->" , selected_gene_id , " having tx'size : ", transcript_size_gene))
     cmp <- cmpoutput("scRNA-seq", transcript_size_gene , selected_tid_tpms, as.factor(classLabels))
-    # TODO : remove all the transcripts with all reads = 0
+    print(paste0("Finishing manova on gene ->" , selected_gene_id))
+    output[i,] = c(selected_gene_id, cmp$p.values$manova)
   }
   
 }
