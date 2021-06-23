@@ -9,9 +9,12 @@ library(micompr)
 boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
 {
   transposed_data <- as.data.frame(t(tid_data))
+  # Log (TPM+1) transformation
+  transposed_data <- log(transposed_data+1)
+  
   pivoted_data <- transposed_data %>% 
     mutate(transcript_id = row.names(.)) %>% 
-    tidyr::gather("Sample.ID", "TPM", 1:sample_size)
+    tidyr::gather("Sample.ID", "log(TPM+1)", 1:sample_size)
   pivoted_data <- pivoted_data %>% left_join(phenotype)
   ggplot(pivoted_data, aes(x=transcript_id, y=TPM, fill=phenotype)) + 
     geom_boxplot() + ggtitle(gene_id) + theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
