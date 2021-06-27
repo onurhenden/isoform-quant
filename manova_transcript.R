@@ -6,6 +6,7 @@ library(tidyfst)
 library(tibble)
 library(micompr)
 
+
 boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
 {
   transposed_data <- as.data.frame(t(tid_data))
@@ -17,8 +18,11 @@ boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
     tidyr::gather("Sample.ID", "TPM", 1:sample_size)
   pivoted_data <- pivoted_data %>% left_join(phenotype)
   # print(pivoted_data)
-  ggplot(pivoted_data, aes(x=transcript_id, y=TPM, fill=phenotype)) + 
-    geom_boxplot() + ggtitle(gene_id) + 
+  ggplot(pivoted_data[which(pivoted_data$TPM>0),], aes(x=transcript_id, y=TPM, fill=phenotype)) + 
+    geom_boxplot(position=position_dodge(1)) + 
+    geom_dotplot(binaxis='y', stackdir='center',position=position_dodge(1), dotsize = 0.3, binwidth= 1/3) +
+    scale_y_continuous(expand = c(0, 0), limits = c(0, NA)) +
+    ggtitle(gene_id) + 
     theme(plot.title = element_text(hjust = 0.5)) + 
     theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
     labs(y = "log(TPM+1)")
@@ -28,10 +32,10 @@ boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
 if (TRUE) 
 {
   experimentList <- c(
-    "bc03ln_tumor_vs_non_tumor"
-    # "bc07ln_tumor_vs_non_tumor"
-    # "er_positive_tumor_vs_non_tumor",
-    # "her2_positive_tumor_vs_non_tumor"
+    "bc03ln_tumor_vs_non_tumor",
+    "bc07ln_tumor_vs_non_tumor",
+    "er_positive_tumor_vs_non_tumor",
+    "her2_positive_tumor_vs_non_tumor"
   )
   
   
@@ -43,7 +47,7 @@ if (TRUE)
   for(i in 1:length(experimentList))
   {
     experiment_name <- experimentList[i]
-    
+    print(experiment_name)
     dir.create(paste0("experiment-outputs/", experiment_name))
     dir.create(paste0("experiment-outputs/", experiment_name, "/gene-tpms"))
     dir.create(paste0("experiment-outputs/", experiment_name, "/boxplots"))
@@ -89,9 +93,10 @@ if (TRUE)
                                         "manova-p-value", "fold_change_difference"))
     
     nRowgenes  <- nrow(transcripts_genes)
-    for(i in 1:nRowgenes)
+    for(i in 1:nRowgenes) # if debug start at 415
     {
       # selected_row <- transcripts_genes %>% filter(gene_id == "ENSG00000115884.10")
+      print(paste0(i, " - ", nRowgenes))
       selected_row <- transcripts_genes[i,]
       selected_gene_id<- selected_row$gene_id
       selected_tids<- selected_row$transcript_ids[[1]]
@@ -178,15 +183,16 @@ if (TRUE)
       
     }
     
+    colnames(output) <- c("gene_id", "manova_p_value")
+    colnames(output_transcript_csv) <- c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
+                                         "manova_p_value", "fold_change_difference")
+    
     output[,2] <- sapply(output[,2] , as.numeric) # convert p values to numeric
     
     output <- output %>% arrange(manova_p_value)
     
-    # dir.create(paste0("experiment-outputs/", experiment_name))
-    # dir.create(paste0("experiment-outputs/", experiment_name, "/gene_tpms"))
-    
     write.csv( output , paste0("experiment-outputs/", experiment_name, "/manova_outputs.csv"))
-    write.csv( output_transcript_csv , paste0("experiment-outputs/", experiment_name, "/transcript_fold_change.csv"))
+    write.csv( output_transcript_csv %>% arrange(manova_p_value) , paste0("experiment-outputs/", experiment_name, "/transcript_fold_change.csv"))
     
     # class_colors <- phenotypes %>% mutate(cLr = ifelse(phenotype == "Tumor", "red","blue"))
     # class_colors <- class_colors$cLr
