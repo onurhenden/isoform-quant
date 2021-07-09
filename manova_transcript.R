@@ -32,10 +32,8 @@ boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
 if (TRUE) 
 {
   experimentList <- c(
-    "bc03ln_tumor_vs_non_tumor",
-    "bc07ln_tumor_vs_non_tumor",
-    "er_positive_tumor_vs_non_tumor",
-    "her2_positive_tumor_vs_non_tumor"
+    "bc03_vs_bc03ln_tumor",
+    "bc07_vs_bc07ln_tumor"
   )
   
   
@@ -51,6 +49,11 @@ if (TRUE)
     dir.create(paste0("experiment-outputs/", experiment_name))
     dir.create(paste0("experiment-outputs/", experiment_name, "/gene-tpms"))
     dir.create(paste0("experiment-outputs/", experiment_name, "/boxplots"))
+    
+    output <- setNames(data.frame(matrix(ncol = 2, nrow = 0)), c("gene_id", "manova_p_value"))
+    output_transcript_csv <- setNames(data.frame(matrix(ncol = 7, nrow = 0)), 
+                                      c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
+                                        "manova-p-value", "fold_change_difference"))
     
     phenotypes <- read.csv(paste0("data/", experiment_name, ".csv"), sep = ",", header= TRUE)
     classLabels <- phenotypes$phenotype
@@ -68,14 +71,42 @@ if (TRUE)
       filter(ZeroCounts < sampleSize * 0.9) %>% 
       select(-ZeroCounts)
     
-    transcripts_genes <- expression_reads_filtered %>% 
-      select(Gene_or_Transcript_ID) %>% #get the transcript column
-      left_join(gtf_df %>% 
-                  select(gene_id, transcript_id ) %>% 
-                  distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>% 
+    
+    expression_reads_filtered_grouped <- t_dt(expression_reads_filtered %>% select(-Gene_or_Transcript_ID)) %>%  mutate(cls_lbl = classLabels)
+    clusterCenters <- expression_reads_filtered_grouped %>% group_by(cls_lbl) %>% summarise_all(list(median))
+    clusterCenters_ratio <- rbind ( clusterCenters, data.frame(cls_lbl = "ratio" ,  clusterCenters[1,-1] / clusterCenters[2,-1] ))
+    clusterCenters_ratio <- t_dt(clusterCenters_ratio)
+    colnames(clusterCenters_ratio) <- clusterCenters_ratio[1,]
+    clusterCenters_ratio <- clusterCenters_ratio[-1,]
+    group_1 <- colnames(clusterCenters_ratio)[1]
+    group_2 <- colnames(clusterCenters_ratio)[2]
+    clusterCenters_ratio <- mutate_all(clusterCenters_ratio, function(x) as.numeric(as.character(x)))
+    
+    clusterCenters_filtered <- clusterCenters_ratio %>% filter((!!as.name(group_1)>10 | !!as.name(group_2)>10) & !is.na(ratio) & !is.infinite(ratio) & ratio != 0 )
+    clusterCenters_filtered[clusterCenters_filtered == 0] <-1
+    clusterCenters_filtered <- clusterCenters_filtered %>% mutate(ratio = !!as.name(group_1) / !!as.name(group_2))
+    
+    # clusterCenters_filtered2 <- clusterCenters_filtered %>% filter(ratio != "Inf" & ratio != 0)
+    
+    transcripts_genes <- clusterCenters_filtered %>% 
+      rownames_to_column("Gene_or_Transcript_ID") %>% 
+      left_join(gtf_df %>% select(gene_id, transcript_id ) %>% distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>% 
       group_by(gene_id) %>% 
+      mutate(isoformSwitch = ifelse(min(ratio)<1 && max(ratio)>1, TRUE,FALSE)) %>% 
+      filter(isoformSwitch == TRUE) %>% 
+      filter(n()>1) %>% 
       summarise(transcript_ids = list(Gene_or_Transcript_ID)) %>%  # add list of transcript ids for each gene
       filter(!is.na(gene_id)) # filter out the na group
+    
+    col_selectable_clusterCenteres <- t_dt(clusterCenters_filtered)
+    # transcripts_genes <- expression_reads_filtered %>% 
+    #   select(Gene_or_Transcript_ID) %>% #get the transcript column
+    #   left_join(gtf_df %>% 
+    #               select(gene_id, transcript_id ) %>% 
+    #               distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>% 
+    #   group_by(gene_id) %>% 
+    #   summarise(transcript_ids = list(Gene_or_Transcript_ID)) %>%  # add list of transcript ids for each gene
+    #   filter(!is.na(gene_id)) # filter out the na group
     # There are two transcripts without gene_id - Check for later
     # gene_id transcript_ids   
     # <chr>   <chr>            
@@ -86,28 +117,27 @@ if (TRUE)
     # transpose matrix and keep transcriptIDs as colnames and add seperate sampleID column
     expression_reads_filtered <- expression_reads_filtered[,-1] # Take out geneID column
     transpose_tpms <- t_dt(expression_reads_filtered)
-    
-    output <- setNames(data.frame(matrix(ncol = 2, nrow = 0)), c("gene_id", "manova_p_value"))
-    output_transcript_csv <- setNames(data.frame(matrix(ncol = 7, nrow = 0)), 
-                                      c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
-                                        "manova-p-value", "fold_change_difference"))
-    
+
     nRowgenes  <- nrow(transcripts_genes)
     for(i in 1:nRowgenes) # if debug start at 415
     {
-      # selected_row <- transcripts_genes %>% filter(gene_id == "ENSG00000115884.10")
+      # selected_row <- transcripts_genes %>% filter(gene_id == "ENSG00000114030.12")
       print(paste0(i, " - ", nRowgenes))
       selected_row <- transcripts_genes[i,]
       selected_gene_id<- selected_row$gene_id
       selected_tids<- selected_row$transcript_ids[[1]]
       selected_tid_tpms <- transpose_tpms %>% select(all_of(selected_tids))
       
+      selected_clusterCenter <- t_dt(col_selectable_clusterCenteres %>% select(all_of(selected_tids)))
+      
       #DTU FILTERING
-      tpms_w_classlabels <- selected_tid_tpms %>% mutate(cls_lbl = classLabels)
+      # tpms_w_classlabels <- selected_tid_tpms %>% mutate(cls_lbl = classLabels)
       
-      clusterCenters <- tpms_w_classlabels %>% group_by(cls_lbl) %>% summarise_all(list(median))
+      # selected_clusterCenter <- tpms_w_classlabels %>% group_by(cls_lbl) %>% summarise_all(list(median))
       
-      clusterCenters <- rbind ( clusterCenters, data.frame(cls_lbl = "ratio" ,  clusterCenters[1,-1] / clusterCenters[2,-1] ))
+      # selected_clusterCenter <- rbind ( selected_clusterCenter, data.frame(cls_lbl = "ratio" ,  clusterCenters[1,-1] / clusterCenters[2,-1] ))
+      
+      
       
       # ratioList <- as.numeric( clusterCenters[1,-1] / clusterCenters[2,-1] )
       
@@ -119,17 +149,19 @@ if (TRUE)
       # if(any(cl>1 ) && any(ratioList>0 && ratioList<1))
       #   isoformSwitchFound  = TRUE
       # clusterCenters <- clusterCenters %>% mutate(totalSum = rowSums(across(where(is.numeric))))
-      clusterCenters <- t_dt(column_to_rownames(clusterCenters, var = "cls_lbl"))
-      clusterCenters <- clusterCenters %>% filter(`Non-Tumor`>10 & Tumor>10  & !is.nan(ratio))
-      significant_transcripts_found <- (nrow(clusterCenters) >=1)
-      isoformSwitchFound = FALSE
-      ratioList = as.vector(clusterCenters[['ratio']])
-      if(any(ratioList>1 ) && any(ratioList>0 && ratioList<1))
-        isoformSwitchFound  = TRUE
-      # print(paste0("Selected gene -> ", selected_gene_id))
-      if(significant_transcripts_found && isoformSwitchFound)
-      {
-        print(paste0("Significant switch found for gene -> ", selected_gene_id))
+      # selected_clusterCenter <- t_dt(column_to_rownames(selected_clusterCenter, var = "cls_lbl"))
+      # group_1 <- colnames(clusterCenters)[1]
+      # group_2 <- colnames(clusterCenters)[2]
+      # clusterCenters <- clusterCenters %>% filter(!!group_1>10 & !!group_2>10  & !is.nan(ratio) & !is.infinite(ratio))
+      # significant_transcripts_found <- (nrow(clusterCenters) >=1)
+      # isoformSwitchFound = FALSE
+      # ratioList = as.vector(clusterCenters[['ratio']])
+      # if(any(ratioList>1 ) && any(ratioList>0 && ratioList<1))
+      #   isoformSwitchFound  = TRUE
+      # # print(paste0("Selected gene -> ", selected_gene_id))
+      # if(significant_transcripts_found && isoformSwitchFound)
+      # {
+        # print(paste0("Significant switch found for gene -> ", selected_gene_id))
         transcript_size_gene <- length(selected_tids)
         # Perform manova on it
         cmp <- cmpoutput("scRNA-seq", transcript_size_gene , selected_tid_tpms, as.factor(classLabels))
@@ -142,14 +174,14 @@ if (TRUE)
         if(!is.na(cmp$p.values$manova) && cmp$p.values$manova < 0.05)
         {
           # 2 transcriptSelection and foldchangeDifference
-          significant_transcript_ids <- row.names(clusterCenters)
+          significant_transcript_ids <- row.names(selected_clusterCenter)
           significant_transcript_ids_subsets <- combn(significant_transcript_ids,2)
           for(t_subset_id in 1:ncol(significant_transcript_ids_subsets))
           {
             selected_two_transcript <- significant_transcript_ids_subsets[,t_subset_id]
-            tmp_clusterCenters <- t_dt(clusterCenters) %>% select(all_of(selected_two_transcript)) # selected two transcript only
+            tmp_clusterCenters <- t_dt(selected_clusterCenter) %>% select(all_of(selected_two_transcript)) # selected two transcript only
             two_isoform_ratio_list <- t_dt(tmp_clusterCenters)[['ratio']]
-            fold_change_difference <- diff(log2(t_dt(tmp_clusterCenters)[['ratio']]))
+            fold_change_difference <- diff(log2(as.numeric(t_dt(tmp_clusterCenters)[['ratio']])))
             if(any(two_isoform_ratio_list>1 ) && any(two_isoform_ratio_list>0 && two_isoform_ratio_list<1))
             {
               boxplot_for_transcripts(paste0(selected_gene_id, "_", t_subset_id),selected_tid_tpms %>% select(all_of(selected_two_transcript)),phenotypes,sampleSize)
@@ -159,8 +191,8 @@ if (TRUE)
               Transcript1_Type = (transcript_types %>% filter(Transcript.ID == selected_two_transcript[1]))[["Type"]]
               Transcript2_Type = (transcript_types %>% filter(Transcript.ID == selected_two_transcript[2]))[["Type"]]
               
-              output_transcript_csv <- rbind(output_transcript_csv, 
-                                             data.frame(selected_gene_id, 
+              output_transcript_csv <- rbind(output_transcript_csv,
+                                             data.frame(selected_gene_id,
                                                         selected_two_transcript[1],
                                                         Transcript1_Type,
                                                         selected_two_transcript[2],
@@ -171,7 +203,7 @@ if (TRUE)
               # print(paste0("Selected transcript->", selected_two_transcript))
               # print(paste0("Fold change difference->", fold_change_difference))
               # print(paste0("Manova p-value->", cmp$p.values$manova))
-              # print(clusterCenters)
+              # print(selected_clusterCenter)
             }
           }
 
@@ -181,7 +213,6 @@ if (TRUE)
         
       }
       
-    }
     
     colnames(output) <- c("gene_id", "manova_p_value")
     colnames(output_transcript_csv) <- c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
