@@ -18,7 +18,7 @@ boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
     tidyr::gather("Sample.ID", "TPM", 1:sample_size)
   pivoted_data <- pivoted_data %>% left_join(phenotype)
   # print(pivoted_data)
-  ggplot(pivoted_data[which(pivoted_data$TPM>0),], aes(x=transcript_id, y=TPM, fill=phenotype)) + 
+  ggplot(pivoted_data, aes(x=transcript_id, y=TPM, fill=phenotype)) + 
     geom_boxplot(position=position_dodge(1)) + 
     geom_dotplot(binaxis='y', stackdir='center',position=position_dodge(1), dotsize = 0.3, binwidth= 1/3) +
     scale_y_continuous(expand = c(0, 0), limits = c(0, NA)) +
@@ -32,8 +32,9 @@ boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
 if (TRUE) 
 {
   experimentList <- c(
-    "bc03_vs_bc03ln_tumor",
-    "bc07_vs_bc07ln_tumor"
+    "bc07_vs_bc07ln_tumor",
+    "bc03_vs_bc03ln_tumor"
+    #25	ENSG00000143549.19	ENST00000611659.4	Intron_9	ENST00000341485.9	3UTR	0.0277421482451465	1.24215773503332
   )
   
   
@@ -82,13 +83,13 @@ if (TRUE)
     group_2 <- colnames(clusterCenters_ratio)[2]
     clusterCenters_ratio <- mutate_all(clusterCenters_ratio, function(x) as.numeric(as.character(x)))
     
-    clusterCenters_filtered <- clusterCenters_ratio %>% filter((!!as.name(group_1)>10 | !!as.name(group_2)>10) & !is.na(ratio) & !is.infinite(ratio) & ratio != 0 )
+    clusterCenters_filtered <- clusterCenters_ratio %>% filter((!!as.name(group_1)>10 | !!as.name(group_2)>10) & !is.na(ratio)) # & !is.infinite(ratio) & ratio != 0)
     clusterCenters_filtered[clusterCenters_filtered == 0] <-1
     clusterCenters_filtered <- clusterCenters_filtered %>% mutate(ratio = !!as.name(group_1) / !!as.name(group_2))
     
     # clusterCenters_filtered2 <- clusterCenters_filtered %>% filter(ratio != "Inf" & ratio != 0)
     
-    transcripts_genes <- clusterCenters_filtered %>% 
+    isoform_switch_genes <- clusterCenters_filtered %>% 
       rownames_to_column("Gene_or_Transcript_ID") %>% 
       left_join(gtf_df %>% select(gene_id, transcript_id ) %>% distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>% 
       group_by(gene_id) %>% 
@@ -99,36 +100,40 @@ if (TRUE)
       filter(!is.na(gene_id)) # filter out the na group
     
     col_selectable_clusterCenteres <- t_dt(clusterCenters_filtered)
-    # transcripts_genes <- expression_reads_filtered %>% 
-    #   select(Gene_or_Transcript_ID) %>% #get the transcript column
-    #   left_join(gtf_df %>% 
-    #               select(gene_id, transcript_id ) %>% 
-    #               distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>% 
-    #   group_by(gene_id) %>% 
-    #   summarise(transcript_ids = list(Gene_or_Transcript_ID)) %>%  # add list of transcript ids for each gene
-    #   filter(!is.na(gene_id)) # filter out the na group
+    
+    transcripts_genes <- expression_reads_filtered %>%
+      select(Gene_or_Transcript_ID) %>% #get the transcript column
+      left_join(gtf_df %>%
+                  select(gene_id, transcript_id ) %>%
+                  distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>%
+      group_by(gene_id) %>%
+      summarise(transcript_ids = list(Gene_or_Transcript_ID)) %>%  # add list of transcript ids for each gene
+      filter(!is.na(gene_id)) # filter out the na group
     # There are two transcripts without gene_id - Check for later
     # gene_id transcript_ids   
     # <chr>   <chr>            
     # 1 NA      ENST00000360403.2
     # 2 NA      ENST00000372183.3
     
+    transcripts_genes_filtered <- transcripts_genes %>% filter(gene_id %in% isoform_switch_genes$gene_id)
     
     # transpose matrix and keep transcriptIDs as colnames and add seperate sampleID column
     expression_reads_filtered <- expression_reads_filtered[,-1] # Take out geneID column
     transpose_tpms <- t_dt(expression_reads_filtered)
 
-    nRowgenes  <- nrow(transcripts_genes)
+    nRowgenes  <- nrow(isoform_switch_genes)
     for(i in 1:nRowgenes) # if debug start at 415
     {
-      # selected_row <- transcripts_genes %>% filter(gene_id == "ENSG00000114030.12")
+      # selected_row <- transcripts_genes_filtered %>% filter(gene_id == "ENSG00000062650.18")
       print(paste0(i, " - ", nRowgenes))
-      selected_row <- transcripts_genes[i,]
+      selected_row <- transcripts_genes_filtered[i,]
       selected_gene_id<- selected_row$gene_id
       selected_tids<- selected_row$transcript_ids[[1]]
       selected_tid_tpms <- transpose_tpms %>% select(all_of(selected_tids))
       
-      selected_clusterCenter <- t_dt(col_selectable_clusterCenteres %>% select(all_of(selected_tids)))
+      isoform_switch_selected_tids <- (isoform_switch_genes %>% filter(gene_id == !!selected_gene_id ))$transcript_ids[[1]]
+      
+      selected_clusterCenter <- t_dt(col_selectable_clusterCenteres %>% select(all_of(isoform_switch_selected_tids)))
       
       #DTU FILTERING
       # tpms_w_classlabels <- selected_tid_tpms %>% mutate(cls_lbl = classLabels)
@@ -184,7 +189,6 @@ if (TRUE)
             fold_change_difference <- diff(log2(as.numeric(t_dt(tmp_clusterCenters)[['ratio']])))
             if(any(two_isoform_ratio_list>1 ) && any(two_isoform_ratio_list>0 && two_isoform_ratio_list<1))
             {
-              boxplot_for_transcripts(paste0(selected_gene_id, "_", t_subset_id),selected_tid_tpms %>% select(all_of(selected_two_transcript)),phenotypes,sampleSize)
               # write.csv( selected_tid_tpms %>% mutate(cls_lbl = classLabels) , paste0("experiment-outputs/", experiment_name,"/gene-tpms/" , selected_gene_id,".csv"))
               # print(clusterCenters)
               
@@ -199,6 +203,8 @@ if (TRUE)
                                                         Transcript2_Type,
                                                         cmp$p.values$manova,
                                                         fold_change_difference))
+              boxplot_for_transcripts(paste0(selected_gene_id,  "_", Transcript1_Type, "_",Transcript2_Type , "_", t_subset_id ),selected_tid_tpms %>% select(all_of(selected_two_transcript)),phenotypes,sampleSize)
+              
               # print(paste0("Gene_id->", selected_gene_id))
               # print(paste0("Selected transcript->", selected_two_transcript))
               # print(paste0("Fold change difference->", fold_change_difference))
@@ -246,7 +252,6 @@ if (TRUE)
   
   
 }
-
 
 
 
