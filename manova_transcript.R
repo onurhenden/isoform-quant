@@ -186,7 +186,7 @@ if (TRUE)
             selected_two_transcript <- significant_transcript_ids_subsets[,t_subset_id]
             tmp_clusterCenters <- t_dt(selected_clusterCenter) %>% select(all_of(selected_two_transcript)) # selected two transcript only
             two_isoform_ratio_list <- t_dt(tmp_clusterCenters)[['ratio']]
-            fold_change_difference <- diff(log2(as.numeric(t_dt(tmp_clusterCenters)[['ratio']])))
+            fold_change_difference <- abs(diff(log2(as.numeric(t_dt(tmp_clusterCenters)[['ratio']]))))
             if(any(two_isoform_ratio_list>=1 ) && any(two_isoform_ratio_list<1))
             {
               # write.csv( selected_tid_tpms %>% mutate(cls_lbl = classLabels) , paste0("experiment-outputs/", experiment_name,"/gene-tpms/" , selected_gene_id,".csv"))
