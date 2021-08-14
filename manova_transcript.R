@@ -11,8 +11,9 @@ boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
 {
   transposed_data <- as.data.frame(t(tid_data))
   # Log (TPM+1) transformation
-  transposed_data <- log2(transposed_data+1)
+  # transposed_data <- log2(transposed_data+1)
   # print(transposed_data)
+  colnames(transposed_data) <- phenotype$Sample.ID
   pivoted_data <- transposed_data %>% 
     mutate(transcript_id = row.names(.)) %>% 
     tidyr::gather("Sample.ID", "TPM", 1:sample_size)
@@ -26,18 +27,58 @@ boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
     theme(plot.title = element_text(hjust = 0.5)) + 
     theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
     labs(y = "log(TPM+1)")
-  ggsave(filename = paste0(gene_id, ".png"), path= paste0("experiment-outputs/", experiment_name, "/boxplots") ) 
+  ggsave(filename = paste0(gene_id, ".jpeg"), path= paste0("experiment-outputs/", experiment_name, "/boxplots") ) 
+}
+
+violing_plot_for_transcripts = function(gene_id, tid_data, phenotype)
+{
+  
+  with_groups <- left_join(tid_data %>% mutate(Sample.ID=phenotype$Sample.ID), phenotype)
+  data <- with_groups %>%  pivot_longer(!c(phenotype,Sample.ID), names_to = "transcripts", values_to = "TPM")
+  ggstatsplot::grouped_ggbetweenstats(data, 
+                                      x = phenotype,
+                                      y = TPM,
+                                      grouping.var = transcripts,
+                                      ylab = "TPM (log scale)",
+                                      pairwise.display = "significant",
+                                      p.adjust.method = "fdr",
+                                      results.subtitle = FALSE)
+  ggsave(filename = paste0(gene_id, ".jpeg"), path= paste0("experiment-outputs/", experiment_name, "/boxplots") ) 
+}
+
+remove_outliers <- function(x, na.rm = TRUE, ...) {
+  x_median <- median(x)
+  x_mean <- mean(x)
+  x[x == 0] <- median(x)
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = na.rm, ...)
+  H <- 1.5 * IQR(x, na.rm = na.rm)
+  y <- x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  y_median <- median(y ,na.rm = TRUE)
+  y_mean <- mean(y ,na.rm = TRUE)
+  # y[is.na(y)] <- x_median
+  # y[is.na(y)] <- x_mean
+  y[is.na(y)] <- y_median
+  # y[is.na(y)] <- y_mean
+  y
 }
 
 if (TRUE) 
 {
   experimentList <- c(
-    "bc07_vs_bc07ln_tumor",
-    "bc03_vs_bc03ln_tumor"
+    "bc07_vs_bc07ln_tumor"
+    # "bc03_vs_bc03ln_tumor"
     #25	ENSG00000143549.19	ENST00000611659.4	Intron_9	ENST00000341485.9	3UTR	0.0277421482451465	1.24215773503332
+    # "er_tumor_vs_her2_tumor",
+    # "er_tumor_vs_tnbc_tumor",
+    # "er_tumor_vs_er_her2_tumor",
+    # "her2_tumor_vs_tnbc_tumor",
+    # "her2_tumor_vs_er_her2_tumor",
+    # "tnbc_tumor_vs_er_her2_tumor"
   )
   
-  
+  setwd("/Users/vlmedia/Thesis/R-Projects/isoform-quant")
   gtf_df <- as.data.frame(rtracklayer::import('data/gencode.v27.annotation.gtf.gz'))
   expression_reads <- read.table("data/expression.matrix.tx.numreads.tsv", sep = '\t' , header = TRUE , stringsAsFactors = FALSE)
   rownames(expression_reads) <- expression_reads[,1] # add transcriptIDs as rownames
@@ -51,7 +92,7 @@ if (TRUE)
     dir.create(paste0("experiment-outputs/", experiment_name, "/gene-tpms"))
     dir.create(paste0("experiment-outputs/", experiment_name, "/boxplots"))
     
-    output <- setNames(data.frame(matrix(ncol = 2, nrow = 0)), c("gene_id", "manova_p_value"))
+    output <- setNames(data.frame(matrix(ncol = 3, nrow = 0)), c("gene_id", "manova_p_value", "bartlett_t_test_p_value"))
     output_transcript_csv <- setNames(data.frame(matrix(ncol = 7, nrow = 0)), 
                                       c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
                                         "manova-p-value", "fold_change_difference"))
@@ -68,9 +109,9 @@ if (TRUE)
     sampleSize <- ncol(expression_reads_filtered) -1 # take out gene_id column
     
     expression_reads_filtered <- expression_reads_filtered %>% 
-      mutate(ZeroCounts =  rowSums(.[,-1]== 0) ) %>% 
-      filter(ZeroCounts < sampleSize * 0.9) %>% 
-      select(-ZeroCounts)
+      mutate(SignificantCounts =  rowSums(.[,-1] > 10) ) %>% 
+      filter(SignificantCounts > sampleSize * 0.9) %>% 
+      select(-SignificantCounts)
     
     
     expression_reads_filtered_grouped <- t_dt(expression_reads_filtered %>% select(-Gene_or_Transcript_ID)) %>%  mutate(cls_lbl = classLabels)
@@ -124,9 +165,9 @@ if (TRUE)
     nRowgenes  <- nrow(isoform_switch_genes)
     for(i in 1:nRowgenes) # if debug start at 415
     {
-      # selected_row <- transcripts_genes_filtered %>% filter(gene_id == "ENSG00000062650.18")
+      # selected_row <- isoform_switch_genes %>% filter(gene_id == "ENSG00000075624.13")
       print(paste0(i, " - ", nRowgenes))
-      selected_row <- transcripts_genes_filtered[i,]
+      selected_row <- isoform_switch_genes[i,]
       selected_gene_id<- selected_row$gene_id
       selected_tids<- selected_row$transcript_ids[[1]]
       selected_tid_tpms <- transpose_tpms %>% select(all_of(selected_tids))
@@ -167,13 +208,25 @@ if (TRUE)
       # if(significant_transcripts_found && isoformSwitchFound)
       # {
         # print(paste0("Significant switch found for gene -> ", selected_gene_id))
+      tid_tpms_groups <- left_join(log2(selected_tid_tpms+1) %>% mutate(Sample.ID=rownames(selected_tid_tpms)), phenotypes, by ="Sample.ID")
+
+      outlier_corrected_tpms <- tid_tpms_groups %>% group_by(phenotype) %>%
+        mutate_if(is.numeric, remove_outliers) %>% ungroup()  %>% select(where(is.numeric))
+      # rownames(outlier_corrected_tpms) <- phenotypes$Sample.ID
+      
+      # tid_corrected_groups <- left_join(outlier_corrected_tpms %>% mutate(Sample.ID=phenotypes$Sample.ID), phenotypes)
+      # ggbetweenstats(tid_corrected_groups,phenotype, ENST00000464611.1, outlier.tagging = TRUE)
+      # ggbetweenstats(tid_corrected_groups,phenotype, ENST00000331789.9, outlier.tagging = TRUE)
+      
         transcript_size_gene <- length(selected_tids)
         # Perform manova on it
-        cmp <- cmpoutput("scRNA-seq", transcript_size_gene , selected_tid_tpms, as.factor(classLabels))
+        # cmp_non_corrected <- cmpoutput("scRNA-seq", transcript_size_gene , selected_tid_tpms, as.factor(classLabels))
+        cmp <- cmpoutput("scRNA-seq", transcript_size_gene , outlier_corrected_tpms, as.factor(classLabels))
+        t_test_assumptions <- assumptions(cmp)
         # print( paste0(i, " - ", nRowgenes))
         # rbindlist(list(output,c(selected_gene_id, cmp$p.values$manova) ))
         # output[i,] = c(selected_gene_id, cmp$p.values$manova)
-        output <- rbind( output, data.frame(selected_gene_id, cmp$p.values$manova))
+        output <- rbind( output, data.frame(selected_gene_id, cmp$p.values$manova , t_test_assumptions$ttest$vartest[[1]]$p.value ))
         print(paste0(cmp$p.values$manova))
         
         if(!is.na(cmp$p.values$manova) && cmp$p.values$manova < 0.05)
@@ -203,7 +256,8 @@ if (TRUE)
                                                         Transcript2_Type,
                                                         cmp$p.values$manova,
                                                         fold_change_difference))
-              boxplot_for_transcripts(paste0(selected_gene_id,  "_", Transcript1_Type, "_",Transcript2_Type , "_", t_subset_id ),selected_tid_tpms %>% select(all_of(selected_two_transcript)),phenotypes,sampleSize)
+              # boxplot_for_transcripts(paste0(selected_gene_id,  "_", Transcript1_Type, "_",Transcript2_Type , "_", t_subset_id ),outlier_corrected_tpms %>% select(all_of(selected_two_transcript)),phenotypes,sampleSize)
+              violing_plot_for_transcripts(paste0(selected_gene_id,  "_", Transcript1_Type, "_",Transcript2_Type , "_", t_subset_id ),outlier_corrected_tpms %>% select(all_of(selected_two_transcript)),phenotypes)
               
               # print(paste0("Gene_id->", selected_gene_id))
               # print(paste0("Selected transcript->", selected_two_transcript))
@@ -220,7 +274,7 @@ if (TRUE)
       }
       
     
-    colnames(output) <- c("gene_id", "manova_p_value")
+    colnames(output) <- c("gene_id", "manova_p_value", "bartlett_t_test_p_value")
     colnames(output_transcript_csv) <- c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
                                          "manova_p_value", "fold_change_difference")
     
@@ -229,6 +283,7 @@ if (TRUE)
     output <- output %>% arrange(manova_p_value)
     
     write.csv( output , paste0("experiment-outputs/", experiment_name, "/manova_outputs.csv"))
+    write.csv( output %>% filter(bartlett_t_test_p_value > 0.05) , paste0("experiment-outputs/", experiment_name, "/manova_outputs_t_test_passed.csv"))
     write.csv( output_transcript_csv %>% arrange(manova_p_value) , paste0("experiment-outputs/", experiment_name, "/transcript_fold_change.csv"))
     
     # class_colors <- phenotypes %>% mutate(cLr = ifelse(phenotype == "Tumor", "red","blue"))
@@ -253,5 +308,12 @@ if (TRUE)
   
 }
 
-
-
+# tid_tpms_groups <- left_join(selected_tid_tpms %>% mutate(Sample.ID=rownames(selected_tid_tpms)), phenotypes)
+# 
+# corrected <- tid_tpms_groups %>% group_by(phenotype) %>% 
+#   mutate_if(is.numeric, remove_outliers) %>% ungroup()  %>% select(where(is.numeric))
+# 
+# cmp <- cmpoutput("scRNA-seq", transcript_size_gene , corrected, as.factor(classLabels))
+# 
+# shapiro.test(corrected$ENST00000509541.5)
+# shapiro.test(corrected$ENST00000515580.1)
