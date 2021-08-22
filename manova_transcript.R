@@ -5,6 +5,11 @@ library(tidyverse)
 library(tidyfst)
 library(tibble)
 library(micompr)
+library(ggstatsplot)
+
+library(httr)
+library(jsonlite)
+library(xml2)
 
 
 boxplot_for_transcripts = function( gene_id ,tid_data , phenotype , sample_size)
@@ -48,15 +53,15 @@ violing_plot_for_transcripts = function(gene_id, tid_data, phenotype)
 
 remove_outliers <- function(x, na.rm = TRUE, ...) {
   x_median <- median(x)
-  x_mean <- mean(x)
-  x[x == 0] <- median(x)
+  # x_mean <- mean(x)
+  x[x==0] = x_median
   qnt <- quantile(x, probs=c(.25, .75), na.rm = na.rm, ...)
   H <- 1.5 * IQR(x, na.rm = na.rm)
   y <- x
   y[x < (qnt[1] - H)] <- NA
   y[x > (qnt[2] + H)] <- NA
   y_median <- median(y ,na.rm = TRUE)
-  y_mean <- mean(y ,na.rm = TRUE)
+  # y_mean <- mean(y ,na.rm = TRUE)
   # y[is.na(y)] <- x_median
   # y[is.na(y)] <- x_mean
   y[is.na(y)] <- y_median
@@ -64,12 +69,46 @@ remove_outliers <- function(x, na.rm = TRUE, ...) {
   y
 }
 
-if (TRUE) 
+iglewicz_hoaglin = function(x, threshold = 3.5) {
+  x[x<10] = NA
+  # check input
+  if (!is.numeric(x)) 
+    stop("could not identify outliers: input is not numeric")  
+  # calculate modified Z scores
+  med = median(x, na.rm = T)
+  MAD = median(abs(x - med), na.rm = T)
+  Mi = 0.6745 * (x - med) / MAD
+  
+  x[abs(Mi) > threshold] = NA
+  x[is.na(x)] <- med
+  # x[abs(Mi) > threshold] = NA
+  return(x)
+
+}
+
+get_translation_info = function(transcript_id){
+  if(grepl(".", transcript_id))
+  {
+    transcript_id <- strsplit(transcript_id, "[.]")[[1]][1]
+  }
+  server <- "https://rest.ensembl.org"
+  ext <- paste0("/lookup/id/",transcript_id ,"?expand=1")
+  r <- GET(paste(server, ext, sep = ""), content_type("application/json"))
+  if(r$status_code == 400)
+    return(c("tx-not-found",NULL))
+  else
+    stop_for_status(r)
+  c_r <- content(r)
+  bio_type <- c_r$biotype
+  translation_length <- if(is.null(c_r$Translation$length)) 0 else  c_r$Translation$length
+  return(c(bio_type,translation_length))
+}
+
+if (FALSE) 
 {
   experimentList <- c(
     "bc07_vs_bc07ln_tumor"
-    # "bc03_vs_bc03ln_tumor"
-    #25	ENSG00000143549.19	ENST00000611659.4	Intron_9	ENST00000341485.9	3UTR	0.0277421482451465	1.24215773503332
+    # "bc03_vs_bc03ln_tumor",
     # "er_tumor_vs_her2_tumor",
     # "er_tumor_vs_tnbc_tumor",
     # "er_tumor_vs_er_her2_tumor",
@@ -93,8 +132,8 @@ if (TRUE)
     dir.create(paste0("experiment-outputs/", experiment_name, "/boxplots"))
     
     output <- setNames(data.frame(matrix(ncol = 3, nrow = 0)), c("gene_id", "manova_p_value", "bartlett_t_test_p_value"))
-    output_transcript_csv <- setNames(data.frame(matrix(ncol = 7, nrow = 0)), 
-                                      c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
+    output_transcript_csv <- setNames(data.frame(matrix(ncol = 11, nrow = 0)), 
+                                      c("gene_id", "transcript_1", "tx1_type","tx1_biotype","tx1_length","tx_2", "tx2_type","tx2_biotype","tx2_length",
                                         "manova-p-value", "fold_change_difference"))
     
     phenotypes <- read.csv(paste0("data/", experiment_name, ".csv"), sep = ",", header= TRUE)
@@ -110,7 +149,7 @@ if (TRUE)
     
     expression_reads_filtered <- expression_reads_filtered %>% 
       mutate(SignificantCounts =  rowSums(.[,-1] > 10) ) %>% 
-      filter(SignificantCounts > sampleSize * 0.9) %>% 
+      filter(SignificantCounts > sampleSize * 0.7) %>% 
       select(-SignificantCounts)
     
     
@@ -142,21 +181,21 @@ if (TRUE)
     
     col_selectable_clusterCenteres <- t_dt(clusterCenters_filtered)
     
-    transcripts_genes <- expression_reads_filtered %>%
-      select(Gene_or_Transcript_ID) %>% #get the transcript column
-      left_join(gtf_df %>%
-                  select(gene_id, transcript_id ) %>%
-                  distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>%
-      group_by(gene_id) %>%
-      summarise(transcript_ids = list(Gene_or_Transcript_ID)) %>%  # add list of transcript ids for each gene
-      filter(!is.na(gene_id)) # filter out the na group
+    # transcripts_genes <- expression_reads_filtered %>%
+    #   select(Gene_or_Transcript_ID) %>% #get the transcript column
+    #   left_join(gtf_df %>%
+    #               select(gene_id, transcript_id ) %>%
+    #               distinct(gene_id,transcript_id) , by = c("Gene_or_Transcript_ID" = "transcript_id")) %>%
+    #   group_by(gene_id) %>%
+    #   summarise(transcript_ids = list(Gene_or_Transcript_ID)) %>%  # add list of transcript ids for each gene
+    #   filter(!is.na(gene_id)) # filter out the na group
     # There are two transcripts without gene_id - Check for later
     # gene_id transcript_ids   
     # <chr>   <chr>            
     # 1 NA      ENST00000360403.2
     # 2 NA      ENST00000372183.3
     
-    transcripts_genes_filtered <- transcripts_genes %>% filter(gene_id %in% isoform_switch_genes$gene_id)
+    # transcripts_genes_filtered <- transcripts_genes %>% filter(gene_id %in% isoform_switch_genes$gene_id)
     
     # transpose matrix and keep transcriptIDs as colnames and add seperate sampleID column
     expression_reads_filtered <- expression_reads_filtered[,-1] # Take out geneID column
@@ -165,7 +204,7 @@ if (TRUE)
     nRowgenes  <- nrow(isoform_switch_genes)
     for(i in 1:nRowgenes) # if debug start at 415
     {
-      # selected_row <- isoform_switch_genes %>% filter(gene_id == "ENSG00000075624.13")
+      # selected_row <- isoform_switch_genes %>% filter(gene_id == "ENSG00000092841.18")
       print(paste0(i, " - ", nRowgenes))
       selected_row <- isoform_switch_genes[i,]
       selected_gene_id<- selected_row$gene_id
@@ -248,12 +287,19 @@ if (TRUE)
               Transcript1_Type = (transcript_types %>% filter(Transcript.ID == selected_two_transcript[1]))[["Type"]]
               Transcript2_Type = (transcript_types %>% filter(Transcript.ID == selected_two_transcript[2]))[["Type"]]
               
+              tx1_translation_info <- get_translation_info(selected_two_transcript[1])
+              tx2_translation_info <- get_translation_info(selected_two_transcript[2])
+              
               output_transcript_csv <- rbind(output_transcript_csv,
                                              data.frame(selected_gene_id,
                                                         selected_two_transcript[1],
                                                         Transcript1_Type,
+                                                        tx1_translation_info[1],
+                                                        tx1_translation_info[2],
                                                         selected_two_transcript[2],
                                                         Transcript2_Type,
+                                                        tx2_translation_info[1],
+                                                        tx2_translation_info[2],
                                                         cmp$p.values$manova,
                                                         fold_change_difference))
               # boxplot_for_transcripts(paste0(selected_gene_id,  "_", Transcript1_Type, "_",Transcript2_Type , "_", t_subset_id ),outlier_corrected_tpms %>% select(all_of(selected_two_transcript)),phenotypes,sampleSize)
@@ -275,7 +321,7 @@ if (TRUE)
       
     
     colnames(output) <- c("gene_id", "manova_p_value", "bartlett_t_test_p_value")
-    colnames(output_transcript_csv) <- c("gene_id", "transcript_1", "transcript1_type", "transcript_2", "transcript2_type",
+    colnames(output_transcript_csv) <- c("gene_id", "transcript_1", "tx1_type","tx1_biotype","tx1_length","tx_2", "tx2_type","tx2_biotype","tx2_length",
                                          "manova_p_value", "fold_change_difference")
     
     output[,2] <- sapply(output[,2] , as.numeric) # convert p values to numeric
@@ -286,7 +332,7 @@ if (TRUE)
     write.csv( output %>% filter(bartlett_t_test_p_value > 0.05) , paste0("experiment-outputs/", experiment_name, "/manova_outputs_t_test_passed.csv"))
     write.csv( output_transcript_csv %>% arrange(manova_p_value) , paste0("experiment-outputs/", experiment_name, "/transcript_fold_change.csv"))
     
-    # class_colors <- phenotypes %>% mutate(cLr = ifelse(phenotype == "Tumor", "red","blue"))
+    # class_colors <- phenotypes %>% mutate(cLr = ifelse(phenotype == !!group_1, "red","blue"))
     # class_colors <- class_colors$cLr
     # library(Rtsne) # Load package
     # topValues = 10
@@ -295,14 +341,14 @@ if (TRUE)
     # {
     #   gene_to_plot <- output[i,1]
     #   png(paste0("experiment-outputs/", experiment_name,"/",i,"th-" ,gene_to_plot ,".png"))
-    #   txs <- transcripts_genes %>% filter(gene_id == gene_to_plot)
+    #   txs <- transcripts_genes_filtered %>% filter(gene_id == gene_to_plot)
     #   selected_tids<- txs$transcript_ids[[1]]
     #   selected_tid_tpms <- transpose_tpms %>% select(all_of(selected_tids))
-    #   tsne_out <- Rtsne(as.matrix(selected_tid_tpms), perplexity = 7, check_duplicates = FALSE) # Run TSNE
+    #   tsne_out <- Rtsne(as.matrix(selected_tid_tpms), perplexity = 1, check_duplicates = FALSE) # Run TSNE
     #   plot(tsne_out$Y,col=class_colors,asp=1 , main = gene_to_plot)
     #   dev.off()
     # }
-    # stripplot(tpm$ENST00000641190.1, groups = tpm$classL)
+    # stripplot(selected_tid_tpms$ENST00000523514.1, groups = class_colors)
   }
   
   
